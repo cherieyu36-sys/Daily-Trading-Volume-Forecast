@@ -7,6 +7,7 @@ from sklearn.linear_model import Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from scipy.optimize import minimize
+from profile_models import two_stage_forecasts
 
 SLOTS = pd.date_range('2000-01-01 09:30', periods=26, freq='15min').strftime('%H:%M').tolist()
 CUT = 6  # Six completed bars at 11:00 ET; 20 remain.
@@ -14,7 +15,7 @@ CUT = 6  # Six completed bars at 11:00 ET; 20 remain.
 
 def load_yahoo(ticker):
     import yfinance as yf
-    raw = yf.Ticker(ticker).history(period='1mo', interval='15m', auto_adjust=False, prepost=False)
+    raw = yf.Ticker(ticker).history(period='60d', interval='15m', auto_adjust=False, prepost=False)
     if raw.empty:
         raise RuntimeError('Yahoo returned no data; retry later or use --synthetic.')
     raw = raw.tz_convert('America/New_York')
@@ -64,7 +65,8 @@ def forecasts(history, today):
     model = make_pipeline(StandardScaler(), Ridge(alpha=10.0))
     model.fit(np.stack([features(x) for x in h]), np.log1p(h[:,CUT:,2]))
     ridge = np.maximum(np.expm1(model.predict(features(today)[None,:])[0]), 1.)
-    return {'historical':avg, 'scaled':avg*ratio, 'ridge':ridge}
+    return {'historical':avg, 'scaled':avg*ratio, 'ridge':ridge,
+            **two_stage_forecasts(history, today, features)}
 
 
 def allocate(v, q, risk=0.):
@@ -92,14 +94,14 @@ def backtest(days, order=10000, min_train=10, lookback=30, impact_bps=20., half_
         market_vwap = np.average(p, weights=v)  # bar-close proxy
         for name, pred in f.items():
             predictions.append({'date':day,'model':name,'mae_shares':np.abs(v-pred).mean(), 'share_l1':np.abs(v/v.sum()-pred/pred.sum()).sum()})
-        strategies = {'twap':np.full(len(v), order/len(v)), **{name+'_vwap':allocate(pred,order) for name,pred in f.items()}, 'ridge_optimised':allocate(f['ridge'],order,risk)}
+        strategies = {'twap':np.full(len(v), order/len(v)), **{name+'_vwap':allocate(pred,order) for name,pred in f.items()}, 'ridge_optimised':allocate(f['ridge'],order,risk), 'profile_shrinkage_optimised':allocate(f['profile_shrinkage'],order,risk)}
         for name, q in strategies.items():
             participation = q/v
             cost = half_spread_bps + impact_bps*participation
             fill = p*(1-cost/10000)
             execution = np.average(fill, weights=q)
             metrics.append({'date':day,'strategy':name,'is_bps':10000*(arrival-execution)/arrival,'vwap_slippage_bps':10000*(market_vwap-execution)/market_vwap,'modelled_cost_bps':np.average(cost,weights=q),'max_participation':participation.max(),'completion':q.sum()/order})
-            pred = f.get(name.removesuffix('_vwap'), f['ridge'] if name=='ridge_optimised' else None)
+            pred = f.get(name.removesuffix('_vwap'), f.get(name.removesuffix('_optimised')) if name.endswith('_optimised') else None)
             for j, slot in enumerate(SLOTS[CUT:]):
                 schedules.append({'date':day,'strategy':name,'slot_et':slot,'shares':q[j],'forecast_volume':pred[j] if pred is not None else np.nan,'actual_volume':v[j]})
     return tuple(pd.DataFrame(x) for x in (metrics,schedules,predictions))
