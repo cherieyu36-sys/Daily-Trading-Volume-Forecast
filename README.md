@@ -14,13 +14,13 @@ python research.py --synthetic
 python research.py --ticker AAPL --order 10000
 python -m pytest -q
 ```
-Other US equity tickers (e.g. MSFT, SPY) can be substituted. The Yahoo Finance adapter uses yfinance and one month of 15-minute regular-session bars. Yahoo limits intraday history to the recent past (typically 60 days); availability can vary. See https://ranaroussi.github.io/yfinance/reference/yfinance.functions.html. Do not redistribute market data without checking applicable terms.
+Other US equity tickers (e.g. MSFT, SPY) can be substituted. The Yahoo Finance adapter uses yfinance and up to 60 days of 15-minute regular-session bars. Yahoo limits intraday history to the recent past (typically 60 days); availability can vary. See https://ranaroussi.github.io/yfinance/reference/yfinance.functions.html. Do not redistribute market data without checking applicable terms.
 
 ## Methodology
 - Use six completed morning bars (09:30–11:00 ET), then forecast the twenty remaining bars.
 - Exclude incomplete sessions and half-days. Fit on up to 30 previous complete sessions; evaluate sequentially after a ten-day warm-up.
 - Compare historical mean volume, morning-scaled historical volume and multi-output ridge regression on log volume. Features include morning volume, return, realised volatility and recent volume share.
-- Compare TWAP, three forecast-weighted VWAP schedules, and a risk-aware quadratic execution optimisation. The scaled forecast changes total volume but not relative weights, so its VWAP schedule matches historical VWAP.
+- Compare TWAP, five forecast-weighted VWAP schedules, and two risk-aware quadratic execution schedules. The scaled forecast changes total volume but not relative weights, so its VWAP schedule matches historical VWAP.
 - Score volume MAE and L1 error in volume shares. For sell orders, compare implementation shortfall against the 11:00 arrival-price proxy, remaining-session VWAP slippage, modelled costs and maximum participation.
 
 ## Outputs
@@ -38,6 +38,23 @@ This is an offline research prototype, not a live execution system. Bar-close pr
 
 ## Repository layout
 - `research.py`: data ingestion, feature engineering, forecasting, optimisation, backtest and CLI.
-- `tests/test_research.py`: leakage, allocation and integration checks.
+- `test_research.py`: leakage, allocation and integration checks.
 - `requirements.txt`: dependencies.
-- `example_results/`: synthetic demonstration only.
+- Root-level CSV files and chart: original synthetic demonstration only.
+
+## V0.2: Execution-aware volume forecasting
+
+The new two-stage models estimate remaining total volume using morning activity scaling, then separately predict normalised volume shares. Multi-output ridge regression predicts shares directly; positive clipping and normalisation ensure a valid profile. A shrinkage estimator blends the historical and ridge profiles, selecting the mixing weight from a fixed grid using strictly chronological validation within the available training history. Selection minimises profile L1 error, not realised execution costs.
+
+The original models are retained as baselines. New strategies are profile_ridge_vwap, profile_shrinkage_vwap and profile_shrinkage_optimised. The last uses the existing simplified inventory penalty. No participation caps or calibrated impact coefficients are introduced in this version.
+
+Preliminary user-run AAPL results motivated this change: scaling improved absolute volume forecasts but left the normalised allocation unchanged. Direct profile prediction is a hypothesis to test, not a demonstrated improvement. V0.2 live-data results are pending.
+
+Run:
+```bash
+python -m pytest -q
+python research.py --ticker AAPL --order 10000 --output outputs/v02/aapl
+python research.py --ticker AAPL --order 500000 --output outputs/v02/aapl_large
+```
+
+Compare the generated metrics and forecast errors on common dates. The larger order experiment remains a friction-model simulation and assumes complete fills.
