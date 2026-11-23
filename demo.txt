@@ -1,0 +1,13 @@
+Source: SYNTHETIC | Test days: 70
+                 mean_is_bps  std_is_bps  mean_cost_bps  mean_vwap_slippage_bps  max_participation
+strategy                                                                                          
+historical_vwap       6.8888     51.5502         1.0545                  1.0805             0.0084
+ridge_optimised       6.3098     45.2941         1.0596                  0.4688             0.0096
+ridge_vwap            6.9125     51.5447         1.0546                  1.1041             0.0074
+scaled_vwap           6.8888     51.5502         1.0545                  1.0805             0.0084
+twap                  5.9884     46.1833         1.0631                  0.1504             0.0109
+            mae_shares  share_l1
+model                           
+historical  68224.2990    0.1395
+ridge       39037.7543    0.1449
+scaled      32731.5709    0.1395
